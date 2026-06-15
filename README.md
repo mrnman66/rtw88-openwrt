@@ -51,4 +51,12 @@ This only works for OpenWrt 23.05, 24.10, and 25.12 target devices.
 - Generate a patch file with `git diff > rtw88-openwrt.patch` inside the rtw88 tree.
 - Put the `rtw88-openwrt.patch` in the "patches" folder of a local copy of this repo.
 
+## Tips & Tricks
+
+### My USB adapter is disconnecting too frequently (STA mode)
+
+Some adapters are a bit deaf (8812au looking at you 👀). This behavior is worse when the adapter is heavily used. You can mitigate that by adding this to `/etc/modules.conf`:
+```
+options mac80211 max_nullfunc_tries=20 max_probe_tries=50 beacon_loss_count=70 probe_wait_ms=5000
+```
 
