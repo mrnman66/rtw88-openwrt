@@ -85,17 +85,38 @@ jobs:
           echo "Downloading $SDK_FILE..."
           wget -q "${BASE_URL}${SDK_FILE}"
           
-          # Extract to fixed directory name
           if [[ "$SDK_FILE" == *.tar.zst ]]; then
             tar -I zstd -xf "$SDK_FILE"
           else
             tar -xf "$SDK_FILE"
           fi
           
-          # Rename to fixed directory
           SDK_EXTRACTED=$(echo "$SDK_FILE" | sed 's/\.tar\..*//')
           mv "$SDK_EXTRACTED" sdk
           echo "SDK_DIR=sdk" >> $GITHUB_ENV
+          
+      - name: Checkout OpenWrt for Missing Files
+        run: |
+          VERSION=$(echo "${{ github.event.inputs.version }}" | xargs)
+          
+          # Clone OpenWrt repo to get missing include files
+          git clone --depth=1 \
+            --branch "v${VERSION}" \
+            https://github.com/openwrt/openwrt.git openwrt-repo
+          
+          # Copy missing include files to SDK
+          if [ ! -f "sdk/include/rootfs.mk" ]; then
+            echo "Copying rootfs.mk from OpenWrt repo..."
+            cp openwrt-repo/include/rootfs.mk sdk/include/ 2>/dev/null || true
+          fi
+          
+          # Copy any other potentially missing files
+          for file in rootfs.mk package-defaults.mk package-ipkg.mk package-bin.mk; do
+            if [ ! -f "sdk/include/$file" ] && [ -f "openwrt-repo/include/$file" ]; then
+              echo "Copying $file from OpenWrt repo..."
+              cp "openwrt-repo/include/$file" "sdk/include/"
+            fi
+          done
           
       - name: Build Driver
         working-directory: sdk
@@ -122,9 +143,6 @@ jobs:
           # Initialize .config with target and subtarget
           echo "CONFIG_TARGET_${{ matrix.target }}=y" >> .config
           echo "CONFIG_TARGET_${{ matrix.target }}_${{ matrix.subtarget }}=y" >> .config
-          
-          # Explicitly set TOPDIR to ensure correct path resolution
-          export TOPDIR=$(pwd)
           
           make defconfig V=s
           make package/rtw88-backports/compile V=s -j$(nproc)
