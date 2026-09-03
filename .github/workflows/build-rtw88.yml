@@ -116,7 +116,7 @@ jobs:
             fi
           done
           
-          # Return to SDK root (4 levels up: patches -> rtw88-backports -> kernel -> package -> sdk)
+          # Return to SDK root (4 levels up)
           cd ../../../..
           
           echo "CONFIG_TARGET_${{ matrix.target }}=y" >> .config
@@ -128,13 +128,31 @@ jobs:
       - name: Collect Packages
         run: |
           mkdir -p rtw88-packages
-          find sdk/bin -type f \( -name "kmod-rtw88-backports-usb_*" -o -name "rtw88-backports-firmware*" \) -exec cp {} rtw88-packages/ \;
           
+          echo "=== Searching for all rtw88-related packages in sdk/bin ==="
+          find sdk/bin -type f \( -name "*.apk" -o -name "*.ipk" \) | grep -i rtw88 | tee found-packages.txt
+          
+          echo ""
+          echo "=== Copying all rtw88 packages ==="
+          # Find and copy all rtw88-related packages (both firmware and kernel modules)
+          find sdk/bin -type f \( -name "*rtw88*" \) \( -name "*.apk" -o -name "*.ipk" \) -exec cp -v {} rtw88-packages/ \;
+          
+          echo ""
+          echo "=== Collected packages ==="
           ls -lah rtw88-packages/
-          if [ -z "$(ls -A rtw88-packages)" ]; then
-            echo "Error: No compiled packages found!"
+          
+          # Verify at least one package was found
+          PACKAGE_COUNT=$(ls -1 rtw88-packages/ | wc -l)
+          if [ "$PACKAGE_COUNT" -eq 0 ]; then
+            echo ""
+            echo "ERROR: No rtw88 packages found!"
+            echo "Listing all packages in sdk/bin for debugging:"
+            find sdk/bin -type f \( -name "*.apk" -o -name "*.ipk" \) | head -20
             exit 1
           fi
+          
+          echo ""
+          echo "Successfully collected $PACKAGE_COUNT package(s)"
           
       - name: Upload to GitHub Releases
         uses: softprops/action-gh-release@v2
