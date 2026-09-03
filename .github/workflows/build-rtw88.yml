@@ -119,8 +119,12 @@ jobs:
           done
           cd ../../../
           
+          # Initialize .config with target and subtarget
           echo "CONFIG_TARGET_${{ matrix.target }}=y" >> .config
           echo "CONFIG_TARGET_${{ matrix.target }}_${{ matrix.subtarget }}=y" >> .config
+          
+          # Explicitly set TOPDIR to ensure correct path resolution
+          export TOPDIR=$(pwd)
           
           make defconfig V=s
           make package/rtw88-backports/compile V=s -j$(nproc)
