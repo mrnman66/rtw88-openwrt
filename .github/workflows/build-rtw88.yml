@@ -79,8 +79,8 @@ jobs:
           
           echo "Searching for SDK at $BASE_URL"
           
-          # Find SDK tarball name (xz or zst)
-          SDK_FILE=$(curl -sL "$BASE_URL" | grep -oE 'openwrt-sdk-[a-zA-Z0-9\.\-_]+\.tar\.(xz|zst)' | head -n 1)
+          # Find SDK tarball name (xz or zst) - improved regex to match all filename variations
+          SDK_FILE=$(curl -sL "$BASE_URL" | grep -oE 'openwrt-sdk-[a-zA-Z0-9._-]*\.tar\.(xz|zst)' | head -n 1)
           
           if [ -z "$SDK_FILE" ]; then
             echo "Error: Could not find SDK file at $BASE_URL"
