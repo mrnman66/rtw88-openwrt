@@ -1,0 +1,140 @@
+name: Build rtw88-openwrt Driver
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'OpenWRT version (e.g., 24.10.5)'
+        required: true
+        type: string
+      targets:
+        description: 'Targets (comma-separated, optional)'
+        required: false
+        type: string
+        default: 'x86'
+      subtargets:
+        description: 'Subtargets (comma-separated, optional)'
+        required: false
+        type: string
+        default: '64'
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - id: set-matrix
+        name: Generate Build Matrix
+        run: |
+          TARGETS="${{ github.event.inputs.targets }}"
+          SUBTARGETS="${{ github.event.inputs.subtargets }}"
+          
+          # Fallback to default if empty
+          [ -z "$TARGETS" ] && TARGETS="x86"
+          [ -z "$SUBTARGETS" ] && SUBTARGETS="64"
+          
+          # Parse comma-separated lists into JSON arrays, trimming spaces
+          TARGETS_JSON=$(echo "$TARGETS" | jq -Rc 'split(",") | map(gsub("^[[:space:]]+|[[:space:]]+$"; ""))')
+          SUBTARGETS_JSON=$(echo "$SUBTARGETS" | jq -Rc 'split(",") | map(gsub("^[[:space:]]+|[[:space:]]+$"; ""))')
+          
+          # Zip targets and subtargets to prevent Cartesian product (e.g., x86/64, ramips/mt7621)
+          MATRIX=$(jq -n --argjson t "$TARGETS_JSON" --argjson s "$SUBTARGETS_JSON" \
+            '[($t | keys)[] as $i | {target: $t[$i], subtarget: $s[$i]}]')
+            
+          echo "matrix={\"include\": $MATRIX}" >> $GITHUB_OUTPUT
+
+  build:
+    needs: prepare
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
+      
+    steps:
+      - name: Install Build Prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang flex bison g++ gawk gcc-multilib g++-multilib gettext git libncurses-dev libssl-dev python3-distutils python3-setuptools rsync swig unzip zlib1g-dev file wget zstd jq
+          
+      - name: Download OpenWrt SDK
+        run: |
+          VERSION=$(echo "${{ github.event.inputs.version }}" | xargs) # Trim spaces
+          TARGET="${{ matrix.target }}"
+          SUBTARGET="${{ matrix.subtarget }}"
+          BASE_URL="https://downloads.openwrt.org/releases/${VERSION}/targets/${TARGET}/${SUBTARGET}/"
+          
+          echo "Searching for SDK at $BASE_URL"
+          
+          # Find SDK tarball name (xz or zst)
+          SDK_FILE=$(curl -sL "$BASE_URL" | grep -oE 'openwrt-sdk-[a-zA-Z0-9\.\-_]+\.tar\.(xz|zst)' | head -n 1)
+          
+          if [ -z "$SDK_FILE" ]; then
+            echo "Error: Could not find SDK file at $BASE_URL"
+            exit 1
+          fi
+          
+          echo "Downloading $SDK_FILE..."
+          wget -q "${BASE_URL}${SDK_FILE}"
+          echo "SDK_FILE=$SDK_FILE" >> $GITHUB_ENV
+          
+      - name: Extract SDK
+        run: |
+          if [[ "$SDK_FILE" == *.tar.zst ]]; then
+            tar -I zstd -xf "$SDK_FILE"
+          else
+            tar -xf "$SDK_FILE"
+          fi
+          SDK_DIR=$(echo "$SDK_FILE" | sed 's/\.tar\..*//')
+          echo "SDK_DIR=$SDK_DIR" >> $GITHUB_ENV
+          
+      - name: Build Driver
+        working-directory: ${{ env.SDK_DIR }}
+        run: |
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+          
+          git clone https://github.com/LuisMitaHL/rtw88-openwrt package/kernel/rtw88-backports
+          
+          cd package/kernel/rtw88-backports
+          
+          # Determine major.minor version (e.g., 24.10) to keep only relevant patches
+          VERSION=$(echo "${{ github.event.inputs.version }}" | xargs)
+          MAJOR_MINOR=$(echo "$VERSION" | cut -d. -f1-2)
+          
+          cd patches
+          for patch in *.patch; do
+            if [ -f "$patch" ] && [[ "$patch" != *"$MAJOR_MINOR"* ]]; then
+              echo "Removing unneeded patch: $patch"
+              rm -f "$patch"
+            fi
+          done
+          cd ../../../
+          
+          make defconfig
+          make package/rtw88-backports/compile V=s -j$(nproc)
+          
+      - name: Collect Packages
+        run: |
+          mkdir -p rtw88-packages
+          # Find both .ipk (older OpenWRT) and .apk (OpenWRT > 25.x) packages
+          find ${{ env.SDK_DIR }}/bin -type f \( -name "kmod-rtw88-backports-usb_*" -o -name "rtw88-backports-firmware*" \) -exec cp {} rtw88-packages/ \;
+          
+          ls -lah rtw88-packages/
+          if [ -z "$(ls -A rtw88-packages)" ]; then
+            echo "Error: No compiled packages found!"
+            exit 1
+          fi
+          
+      - name: Upload to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.event.inputs.version }}-${{ matrix.target }}-${{ matrix.subtarget }}-${{ github.run_id }}
+          name: rtw88-openwrt-${{ github.event.inputs.version }}-${{ matrix.target }}-${{ matrix.subtarget }}
+          files: |
+            rtw88-packages/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
