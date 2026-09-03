@@ -27,6 +27,11 @@ jobs:
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
+      - name: Install jq
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+          
       - id: set-matrix
         name: Generate Build Matrix
         run: |
@@ -41,11 +46,16 @@ jobs:
           TARGETS_JSON=$(echo "$TARGETS" | jq -Rc 'split(",") | map(gsub("^[[:space:]]+|[[:space:]]+$"; ""))')
           SUBTARGETS_JSON=$(echo "$SUBTARGETS" | jq -Rc 'split(",") | map(gsub("^[[:space:]]+|[[:space:]]+$"; ""))')
           
-          # Zip targets and subtargets to prevent Cartesian product (e.g., x86/64, ramips/mt7621)
+          # Zip targets and subtargets by index to prevent Cartesian product
           MATRIX=$(jq -n --argjson t "$TARGETS_JSON" --argjson s "$SUBTARGETS_JSON" \
-            '[($t | keys)[] as $i | {target: $t[$i], subtarget: $s[$i]}]')
-            
-          echo "matrix={\"include\": $MATRIX}" >> $GITHUB_OUTPUT
+            '{"include": [($t | keys)[] as $i | {target: $t[$i], subtarget: $s[$i]}]}')
+          
+          # Safe multiline output using heredoc (prevents "Invalid format" errors)
+          {
+            echo 'matrix<<EOF'
+            echo "$MATRIX"
+            echo 'EOF'
+          } >> $GITHUB_OUTPUT
 
   build:
     needs: prepare
@@ -58,11 +68,11 @@ jobs:
       - name: Install Build Prerequisites
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential clang flex bison g++ gawk gcc-multilib g++-multilib gettext git libncurses-dev libssl-dev python3-distutils python3-setuptools rsync swig unzip zlib1g-dev file wget zstd jq
+          sudo apt-get install -y build-essential clang flex bison g++ gawk gcc-multilib g++-multilib gettext git libncurses-dev libssl-dev python3-distutils python3-setuptools rsync swig unzip zlib1g-dev file wget zstd jq curl
           
       - name: Download OpenWrt SDK
         run: |
-          VERSION=$(echo "${{ github.event.inputs.version }}" | xargs) # Trim spaces
+          VERSION=$(echo "${{ github.event.inputs.version }}" | xargs)
           TARGET="${{ matrix.target }}"
           SUBTARGET="${{ matrix.subtarget }}"
           BASE_URL="https://downloads.openwrt.org/releases/${VERSION}/targets/${TARGET}/${SUBTARGET}/"
@@ -101,7 +111,7 @@ jobs:
           
           cd package/kernel/rtw88-backports
           
-          # Determine major.minor version (e.g., 24.10) to keep only relevant patches
+          # Determine major.minor version (e.g., 24.10 from 24.10.5)
           VERSION=$(echo "${{ github.event.inputs.version }}" | xargs)
           MAJOR_MINOR=$(echo "$VERSION" | cut -d. -f1-2)
           
@@ -120,7 +130,7 @@ jobs:
       - name: Collect Packages
         run: |
           mkdir -p rtw88-packages
-          # Find both .ipk (older OpenWRT) and .apk (OpenWRT > 25.x) packages
+          # Find both .ipk (older OpenWRT <= 24.x) and .apk (OpenWRT > 25.x) packages
           find ${{ env.SDK_DIR }}/bin -type f \( -name "kmod-rtw88-backports-usb_*" -o -name "rtw88-backports-firmware*" \) -exec cp {} rtw88-packages/ \;
           
           ls -lah rtw88-packages/
