@@ -110,8 +110,8 @@ jobs:
           
           find patches -maxdepth 1 -name '999-openwrt-*-compat.patch' ! -name "*${MAJOR_MINOR}*" -delete
           
-          # Return to SDK root (4 levels up)
-          cd ../../../..
+          # Return to SDK root (3 levels up from package/kernel/rtw88-backports)
+          cd ../../..
           
           echo "CONFIG_TARGET_${{ matrix.target }}=y" >> .config
           echo "CONFIG_TARGET_${{ matrix.target }}_${{ matrix.subtarget }}=y" >> .config
