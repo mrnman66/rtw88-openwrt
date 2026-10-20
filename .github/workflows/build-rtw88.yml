@@ -108,13 +108,7 @@ jobs:
           VERSION=$(echo "${{ github.event.inputs.version }}" | xargs)
           MAJOR_MINOR=$(echo "$VERSION" | cut -d. -f1-2)
           
-          cd patches
-          for patch in *.patch; do
-            if [ -f "$patch" ] && [[ "$patch" != *"$MAJOR_MINOR"* ]]; then
-              echo "Removing unneeded patch: $patch"
-              rm -f "$patch"
-            fi
-          done
+          find patches -maxdepth 1 -name '999-openwrt-*-compat.patch' ! -name "*${MAJOR_MINOR}*" -delete
           
           # Return to SDK root (4 levels up)
           cd ../../../..
